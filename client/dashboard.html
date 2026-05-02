@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - CodeSpace</title>
+    <link rel="stylesheet" href="/css/style.css?v=2">
+    <style>
+        .dashboard-container { padding: 3rem 5%; max-width: 1200px; margin: 0 auto; flex: 1; width: 100%; z-index: 10; }
+        .room-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1.5rem; margin-top: 2rem; }
+        .room-card { padding: 1.5rem; background: var(--glass-bg); border: 1px solid var(--glass-border); border-radius: 12px; cursor: pointer; transition: transform 0.2s; }
+        .room-card:hover { transform: translateY(-5px); border-color: var(--accent); background: rgba(30, 41, 59, 0.9); }
+        .room-card h3 { margin-bottom: 0.5rem; }
+    </style>
+</head>
+<body>
+    <div class="bg-blobs">
+        <div class="blob blob-1"></div>
+        <div class="blob blob-2"></div>
+    </div>
+    <nav class="navbar">
+        <a href="/" class="nav-brand">CodeSpace</a>
+        <div class="nav-links">
+            <span class="text-main" id="usernameDisplay" style="margin-right: 15px; font-weight: 600;"></span>
+            <button id="logoutBtn" class="btn btn-secondary">Logout</button>
+        </div>
+    </nav>
+
+    <div class="dashboard-container">
+        <div class="flex justify-between align-center glass-panel">
+            <h2>Your Rooms</h2>
+            <button id="createRoomBtn" class="btn">+ New Room</button>
+        </div>
+        <div class="room-grid" id="roomGrid">
+            <p class="text-muted">Loading rooms...</p>
+        </div>
+    </div>
+
+    <script>
+        async function init() {
+            // Check auth
+            const authRes = await fetch("/api/auth/me");
+            const authData = await authRes.json();
+            if (!authData.loggedIn) { window.location.href = "/login"; return; }
+            document.getElementById("usernameDisplay").textContent = `${authData.username}`;
+
+            // Load rooms
+            const roomRes = await fetch("/api/rooms");
+            const rooms = await roomRes.json();
+            const grid = document.getElementById("roomGrid");
+            
+            if (rooms.length === 0) {
+                grid.innerHTML = "<p class='text-muted' style='grid-column: 1 / -1; text-align: center; margin-top: 2rem;'>No rooms active at the moment. Create one!</p>";
+            } else {
+                grid.innerHTML = "";
+                rooms.forEach(room => {
+                    const card = document.createElement("div");
+                    card.className = "room-card glass-panel";
+                    card.innerHTML = `<h3>${room.name}</h3><p class="text-muted">ID: ${room.roomId}</p><p class="text-muted mt-2" style="font-size: 0.85rem; text-transform: capitalize;">Lang: ${room.language}</p>`;
+                    card.onclick = () => window.location.href = `/room/${room.roomId}`;
+                    grid.appendChild(card);
+                });
+            }
+        }
+        
+        document.getElementById("createRoomBtn").addEventListener("click", async () => {
+            const name = prompt("Enter room name:");
+            if (name) {
+                const res = await fetch("/api/rooms", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ name })
+                });
+                const room = await res.json();
+                window.location.href = `/room/${room.roomId}`;
+            }
+        });
+
+        document.getElementById("logoutBtn").addEventListener("click", async () => {
+            await fetch("/api/auth/logout", { method: "POST" });
+            window.location.href = "/";
+        });
+
+        init();
+    </script>
+</body>
+</html>

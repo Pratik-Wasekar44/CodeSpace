@@ -1,0 +1,767 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Room - CodeSpace</title>
+    <link rel="stylesheet" href="/css/style.css?v=2">
+    <style>
+        body { overflow: hidden; }
+        .workspace { display: flex; height: calc(100vh - 75px); }
+        .sidebar { width: 250px; background: var(--bg-secondary); border-right: 1px solid var(--glass-border); display: flex; flex-direction: column; z-index: 5; }
+        .sidebar-section { padding: 1rem; border-bottom: 1px solid var(--glass-border); flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+        .sidebar-section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+        .sidebar-section-header h3 { margin: 0; font-size: 1.1rem; }
+        .file-list { flex: 1; overflow-y: auto; list-style: none; padding: 0; margin: 0; }
+        .file-item { padding: 0.5rem; margin-bottom: 0.25rem; border-radius: 4px; cursor: pointer; display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; transition: background 0.2s; }
+        .file-item:hover { background: rgba(255,255,255,0.05); }
+        .file-item.active { background: rgba(255,255,255,0.1); border-left: 3px solid var(--primary); font-weight: 500; }
+        .main-pane { flex: 1; display: flex; flex-direction: column; }
+        #editor { flex: 1; min-height: 50vh; position: relative;}
+        .terminal-panel { height: 30%; background: var(--bg-primary); border-top: 1px solid var(--glass-border); display: flex; flex-direction: column; z-index: 5;}
+        .terminal-header { background: var(--bg-secondary); padding: 0.5rem 1rem; border-bottom: 1px solid var(--glass-border); display: flex; justify-content: space-between; align-items: center; color: var(--text-main);}
+        .terminal-output { flex: 1; padding: 1rem; font-family: 'Consolas', monospace; color: #94a3b8; overflow-y: auto; white-space: pre-wrap; font-size: 14px;}
+        .users-list { flex: 1; overflow-y: auto; }
+        .user-pill { background: var(--bg-primary); padding: 0.5rem; border-radius: 4px; margin-bottom: 0.5rem; font-size: 0.9rem; border: 1px solid var(--glass-border);}
+        
+        /* Cursor styling */
+        .remote-cursor {
+            width: 2px;
+            height: 1.2em;
+            position: absolute;
+            z-index: 9;
+            animation: blink 1s step-end infinite;
+        }
+        .remote-cursor-flag {
+            position: absolute;
+            top: -18px;
+            left: 0;
+            padding: 2px 6px;
+            font-size: 10px;
+            border-radius: 3px;
+            color: white;
+            white-space: nowrap;
+            z-index: 10;
+            pointer-events: none;
+            opacity: 0.9;
+        }
+
+        /* Video Call UI */
+        .video-container {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            z-index: 1000;
+            pointer-events: none; /* Let clicks pass through empty space */
+        }
+        .video-wrapper {
+            position: relative;
+            width: 200px;
+            height: 150px;
+            background: rgba(0, 0, 0, 0.4);
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            overflow: hidden;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            pointer-events: auto; /* Re-enable for videos */
+        }
+        .video-wrapper video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1); /* Mirror effect */
+        }
+        .video-label {
+            position: absolute;
+            bottom: 8px;
+            left: 8px;
+            background: rgba(0, 0, 0, 0.6);
+            color: white;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            z-index: 2;
+        }
+        .video-controls {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            display: flex;
+            gap: 5px;
+            z-index: 2;
+        }
+        .video-btn {
+            background: rgba(0, 0, 0, 0.6);
+            border: none;
+            color: white;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+        }
+        .video-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+        .btn-danger {
+            background-color: #ef4444;
+            color: white;
+        }
+        .btn-danger:hover {
+            background-color: #dc2626;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar" style="padding: 1rem 2rem;">
+        <div class="flex align-center gap-4">
+            <a href="/dashboard" class="nav-brand" style="font-size: 1.25rem;">CodeSpace</a>
+            <span class="text-muted">|</span>
+            <span id="roomNameDisplay" style="font-weight: 600;">Room Loading...</span>
+        </div>
+        <div class="nav-links flex gap-4 align-center">
+            <select id="languageSelect" class="form-control" style="width: auto; padding: 0.5rem;" disabled title="Language is auto-detected from file extension">
+                <option value="javascript">JavaScript</option>
+                <option value="python">Python</option>
+                <option value="c">C</option>
+                <option value="cpp">C++</option>
+                <option value="java">Java</option>
+            </select>
+            <button id="videoCallBtn" class="btn btn-secondary" style="padding: 0.5rem 1rem;" title="Toggle Video Call">📹 Join Video</button>
+            <button id="downloadBtn" class="btn btn-secondary" style="padding: 0.5rem 1rem;" title="Download Current File">⬇️ Download</button>
+            <button id="runBtn" class="btn" style="padding: 0.5rem 1rem;">Run Code</button>
+        </div>
+    </nav>
+
+    <div class="workspace">
+        <div class="sidebar">
+            <div class="sidebar-section" style="flex: 1.5;">
+                <div class="sidebar-section-header">
+                    <h3>Files</h3>
+                    <div>
+                        <button id="uploadBtn" class="btn btn-secondary" style="padding: 0.2rem 0.5rem; font-size: 1rem; margin-right: 0.5rem;" title="Upload files">⬆️</button>
+                        <input type="file" id="fileUploadInput" multiple style="display: none;">
+                        <button id="createFileBtn" class="btn" style="padding: 0.2rem 0.5rem; font-size: 1rem;">+</button>
+                    </div>
+                </div>
+                <ul class="file-list" id="fileList">
+                    <!-- Files will populate here -->
+                </ul>
+            </div>
+            <div class="sidebar-section" style="flex: 1;">
+                <h3 class="mb-4">Participants (<span id="userCount">0</span>)</h3>
+                <div class="users-list" id="usersList"></div>
+                <div class="mt-4 text-center">
+                    <button class="btn btn-secondary" style="width: 100%; padding: 0.5rem;" onclick="navigator.clipboard.writeText(window.location.href); alert('Link copied!')">Share Link</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="main-pane">
+            <div id="editor"></div>
+            
+            <div class="terminal-panel">
+                <div class="terminal-header">
+                    <span>Terminal / Output</span>
+                    <button class="btn btn-secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;" onclick="document.getElementById('terminalOutput').textContent=''">Clear</button>
+                </div>
+                <div class="terminal-output" id="terminalOutput">System ready. Awaiting execution.</div>
+            </div>
+        </div>
+    </div>
+
+    <div id="videoContainer" class="video-container"></div>
+
+    <!-- Socket.io client -->
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs/loader.min.js"></script>
+
+    <script>
+        const socket = io();
+        const roomId = window.location.pathname.split("/")[2];
+        let username = "Anonymous";
+        let monacoEditor;
+        let roomFiles = {};
+        let currentFile = "main.js";
+        let cursorDecorations = {}; // map of socket.id -> collection
+
+        const monacoLangMap = {
+            "javascript": "javascript",
+            "python": "python",
+            "c": "c",
+            "cpp": "cpp",
+            "java": "java",
+            "html": "html",
+            "css": "css",
+            "json": "json",
+            "js": "javascript",
+            "py": "python"
+        };
+        
+        const extToBackendLang = {
+            "js": "javascript",
+            "py": "python",
+            "c": "c",
+            "cpp": "cpp",
+            "java": "java"
+        };
+
+        const terminalOutput = document.getElementById("terminalOutput");
+        const languageSelect = document.getElementById("languageSelect");
+        const fileList = document.getElementById("fileList");
+
+        function appendOutput(text, type="output") {
+            const span = document.createElement("span");
+            span.textContent = text + "\n";
+            if(type === "error") span.style.color = "#ef4444"; 
+            else if(type === "system") span.style.color = "#94a3b8"; 
+            else span.style.color = "#a3e635"; 
+            terminalOutput.appendChild(span);
+            terminalOutput.scrollTop = terminalOutput.scrollHeight;
+        }
+
+        function renderFileList() {
+            fileList.innerHTML = "";
+            for (const filename in roomFiles) {
+                const li = document.createElement("li");
+                li.className = "file-item" + (filename === currentFile ? " active" : "");
+                
+                const nameSpan = document.createElement("span");
+                nameSpan.textContent = filename;
+                nameSpan.style.flex = "1";
+                nameSpan.onclick = () => switchFile(filename);
+                li.appendChild(nameSpan);
+
+                const delBtn = document.createElement("button");
+                delBtn.textContent = "🗑️";
+                delBtn.style.background = "none";
+                delBtn.style.border = "none";
+                delBtn.style.color = "inherit";
+                delBtn.style.cursor = "pointer";
+                delBtn.style.fontSize = "12px";
+                delBtn.style.opacity = "0.7";
+                delBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    if(confirm(`Are you sure you want to delete ${filename}?`)) {
+                        socket.emit("file-deleted", filename);
+                    }
+                };
+                delBtn.onmouseover = () => delBtn.style.opacity = "1";
+                delBtn.onmouseout = () => delBtn.style.opacity = "0.7";
+                li.appendChild(delBtn);
+
+                fileList.appendChild(li);
+            }
+        }
+
+        function switchFile(filename) {
+            if (currentFile === filename || !monacoEditor) return;
+            
+            // Save current state
+            roomFiles[currentFile] = monacoEditor.getValue();
+            
+            // Clear current remote cursors
+            for(let id in cursorDecorations) {
+                cursorDecorations[id].clear();
+            }
+            cursorDecorations = {};
+
+            currentFile = filename;
+            renderFileList();
+
+            const ext = filename.split('.').pop();
+            const lang = monacoLangMap[ext] || "javascript";
+            monaco.editor.setModelLanguage(monacoEditor.getModel(), lang);
+            
+            const backendLang = extToBackendLang[ext] || "javascript";
+            languageSelect.value = backendLang;
+            
+            monacoEditor.setValue(roomFiles[currentFile] || "");
+        }
+
+        document.getElementById("createFileBtn").addEventListener("click", () => {
+            const filename = prompt("Enter file name (e.g., utils.js):");
+            if (filename && !roomFiles[filename]) {
+                socket.emit("file-created", filename);
+            }
+        });
+
+        document.getElementById("downloadBtn").addEventListener("click", () => {
+            const content = monacoEditor.getValue();
+            const blob = new Blob([content], { type: "text/plain" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = currentFile;
+            a.click();
+            URL.revokeObjectURL(url);
+        });
+
+        const fileUploadInput = document.getElementById("fileUploadInput");
+        document.getElementById("uploadBtn").addEventListener("click", () => fileUploadInput.click());
+        
+        fileUploadInput.addEventListener("change", (e) => {
+            if (!e.target.files) return;
+            for (let f of e.target.files) {
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    const content = ev.target.result;
+                    const filename = f.name;
+                    if (!roomFiles[filename]) {
+                        socket.emit("file-created", filename);
+                        setTimeout(() => socket.emit("code-change", { filename, content }), 200);
+                    } else {
+                        socket.emit("code-change", { filename, content });
+                    }
+                };
+                reader.readAsText(f);
+            }
+            e.target.value = "";
+        });
+
+        async function init() {
+            try {
+                const authRes = await fetch("/api/auth/me");
+                const authData = await authRes.json();
+                if (!authData.loggedIn) { window.location.href = `/login`; return; }
+                username = authData.username;
+            } catch(e) {}
+
+            try {
+                const roomRes = await fetch(`/api/rooms/${roomId}`);
+                if (roomRes.ok) {
+                    const roomData = await roomRes.json();
+                    document.getElementById("roomNameDisplay").textContent = roomData.name || "Room";
+                }
+            } catch(e) {}
+
+            socket.emit("join-room", { roomId, username });
+
+            require.config({ paths: { "vs": "https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs" }});
+            require(["vs/editor/editor.main"], function() {
+                monacoEditor = monaco.editor.create(document.getElementById("editor"), {
+                    value: "\n",
+                    language: "javascript",
+                    theme: "vs-dark",
+                    automaticLayout: true,
+                    fontSize: 15,
+                    minimap: { enabled: false }
+                });
+
+                let isUpdating = false;
+
+                // Sync code changes
+                socket.on("code-change", (data) => {
+                    const { filename, content } = data;
+                    if (filename === currentFile) {
+                        if (monacoEditor.getValue() !== content && content !== undefined) {
+                            isUpdating = true;
+                            const position = monacoEditor.getPosition();
+                            monacoEditor.setValue(content);
+                            if (position) monacoEditor.setPosition(position);
+                            isUpdating = false; 
+                        }
+                    } else {
+                        // Update background file state
+                        roomFiles[filename] = content;
+                    }
+                });
+
+                let timeout;
+                monacoEditor.onDidChangeModelContent(() => {
+                    if (!isUpdating) {
+                        roomFiles[currentFile] = monacoEditor.getValue();
+                        clearTimeout(timeout);
+                        timeout = setTimeout(() => {
+                            socket.emit("code-change", { filename: currentFile, content: monacoEditor.getValue() });
+                        }, 400);
+                    }
+                });
+
+                // Emit cursor position updates
+                monacoEditor.onDidChangeCursorPosition((e) => {
+                    socket.emit("cursor-change", {
+                        filename: currentFile,
+                        position: e.position
+                    });
+                });
+
+                // Listen for remote cursor changes
+                socket.on("cursor-change", (data) => {
+                    if (!monacoEditor || data.filename !== currentFile) return;
+                    
+                    const { position, username, color, id } = data;
+                    if (!cursorDecorations[id]) {
+                        cursorDecorations[id] = monacoEditor.createDecorationsCollection([]);
+                    }
+                    
+                    // Create inline css dynamically for the cursor color
+                    const styleId = `cursor-style-${id}`;
+                    let styleEl = document.getElementById(styleId);
+                    if (!styleEl) {
+                        styleEl = document.createElement('style');
+                        styleEl.id = styleId;
+                        document.head.appendChild(styleEl);
+                    }
+                    styleEl.innerHTML = `
+                        .remote-cursor-${id} { border-left: 2px solid ${color}; position: absolute; height: 100%; border-radius: 2px; }
+                        .remote-flag-${id} { background-color: ${color}; color: black; font-size: 10px; padding: 2px 4px; border-radius: 3px; position: absolute; top: -16px; left: 0; white-space: nowrap; font-weight: bold; }
+                    `;
+
+                    cursorDecorations[id].set([{
+                        range: new monaco.Range(position.lineNumber, position.column, position.lineNumber, position.column),
+                        options: {
+                            className: `remote-cursor-${id}`,
+                            hoverMessage: { value: username },
+                            before: {
+                                content: username,
+                                inlineClassName: `remote-flag-${id}`,
+                                cursorStops: monaco.editor.InjectedTextCursorStops.None,
+                            }
+                        }
+                    }]);
+                });
+
+                socket.on("cursor-remove", (id) => {
+                    if (cursorDecorations[id]) {
+                        cursorDecorations[id].clear();
+                        delete cursorDecorations[id];
+                    }
+                    const styleEl = document.getElementById(`cursor-style-${id}`);
+                    if (styleEl) styleEl.remove();
+
+                    // WebRTC cleanup for this user
+                    removeVideoStream(id);
+                    if (peers[id]) {
+                        peers[id].close();
+                        delete peers[id];
+                    }
+                });
+
+                socket.on("language-change", (lang) => {
+                    languageSelect.value = lang;
+                    monaco.editor.setModelLanguage(monacoEditor.getModel(), monacoLangMap[lang]);
+                });
+
+                socket.on("room-state", (data) => {
+                    roomFiles = data.files;
+                    if(data.language && monacoLangMap[data.language]) {
+                        // languageSelect.value = data.language; // We might not want to force global language if files handle it
+                    }
+                    if (!roomFiles[currentFile]) {
+                        currentFile = Object.keys(roomFiles)[0] || "main.js";
+                    }
+                    monacoEditor.setValue(roomFiles[currentFile] || "");
+                    const ext = currentFile.split('.').pop();
+                    monaco.editor.setModelLanguage(monacoEditor.getModel(), monacoLangMap[ext] || "javascript");
+                    renderFileList();
+                });
+
+                socket.on("file-created", (filename) => {
+                    if (!roomFiles[filename]) {
+                        roomFiles[filename] = "\n";
+                        renderFileList();
+                    }
+                });
+
+                socket.on("file-deleted", (filename) => {
+                    if (roomFiles[filename] !== undefined) {
+                        delete roomFiles[filename];
+                        if (currentFile === filename) {
+                            currentFile = Object.keys(roomFiles)[0] || null;
+                            if (currentFile) {
+                                const ext = currentFile.split('.').pop();
+                                monaco.editor.setModelLanguage(monacoEditor.getModel(), monacoLangMap[ext] || "javascript");
+                                monacoEditor.setValue(roomFiles[currentFile] || "");
+                            } else {
+                                monacoEditor.setValue("");
+                            }
+                        }
+                        renderFileList();
+                    }
+                });
+            });
+
+            socket.on("user-count", c => document.getElementById("userCount").textContent = c);
+            socket.on("users-list", users => {
+                const list = document.getElementById("usersList");
+                list.innerHTML = "";
+                users.forEach(u => {
+                    list.innerHTML += `<div class="user-pill">${u === username ? u + ' (You)' : u}</div>`;
+                });
+            });
+
+            socket.on("console-output", data => {
+                if(typeof data === "string") appendOutput("> " + data, "output");
+                else appendOutput("> " + data.text, data.type);
+            });
+
+            socket.on("user-left", (msg) => {
+               // Add tiny toast or log to terminal if wanted.
+            });
+
+            languageSelect.addEventListener("change", (e) => {
+                const lang = e.target.value;
+                if(monacoEditor) monaco.editor.setModelLanguage(monacoEditor.getModel(), monacoLangMap[lang]);
+                socket.emit("language-change", lang);
+            });
+
+            document.getElementById("runBtn").addEventListener("click", async () => {
+                if(!monacoEditor) return;
+                
+                const ext = currentFile.split('.').pop();
+                const backendLang = extToBackendLang[ext];
+                
+                if (!backendLang) {
+                    appendOutput("Error: Cannot natively execute file extension '." + ext + "'. Supported: .py, .js, .c, .cpp, .java", "error");
+                    return;
+                }
+                
+                appendOutput("Compiling and executing...", "system");
+                
+                try {
+                    const res = await fetch("/api/execute", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            language: backendLang,
+                            sourceCode: monacoEditor.getValue()
+                        })
+                    });
+                    const data = await res.json();
+                    
+                    if(data.error) {
+                        appendOutput(data.error, "error");
+                        socket.emit("console-output", { text: data.error, type: "error" });
+                    } else {
+                        const runOut = data.run ? data.run.output : "";
+                        const compOut = data.compile ? data.compile.output : "";
+                        const fullOut = compOut + "\n" + runOut;
+                        appendOutput(fullOut.trim(), "output");
+                        socket.emit("console-output", { text: fullOut.trim(), type: "output" });
+                    }
+                } catch(err) {
+                    appendOutput("Execution failed.", "error");
+                }
+            });
+
+            // --- WebRTC Logic ---
+            const peers = {}; // socket.id -> RTCPeerConnection
+            let localStream = null;
+            let isVideoActive = false;
+            const videoContainer = document.getElementById("videoContainer");
+            const videoCallBtn = document.getElementById("videoCallBtn");
+
+            const rtcConfig = {
+                iceServers: [
+                    { urls: "stun:stun.l.google.com:19302" },
+                    { urls: "stun:stun1.l.google.com:19302" }
+                ]
+            };
+
+            videoCallBtn.addEventListener("click", async () => {
+                if (!isVideoActive) {
+                    try {
+                        localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                        isVideoActive = true;
+                        videoCallBtn.textContent = "❌ Leave Video";
+                        videoCallBtn.classList.replace("btn-secondary", "btn-danger");
+                        
+                        addVideoStream("local", localStream, "You", true);
+                        socket.emit("webrtc-join");
+                    } catch (err) {
+                        console.error("Failed to get local stream", err);
+                        alert("Could not access camera/microphone");
+                    }
+                } else {
+                    leaveVideoCall();
+                }
+            });
+
+            function leaveVideoCall() {
+                isVideoActive = false;
+                videoCallBtn.textContent = "📹 Join Video";
+                videoCallBtn.classList.replace("btn-danger", "btn-secondary");
+                
+                if (localStream) {
+                    localStream.getTracks().forEach(track => track.stop());
+                    localStream = null;
+                }
+                
+                for (let id in peers) {
+                    peers[id].close();
+                    delete peers[id];
+                }
+                
+                videoContainer.innerHTML = "";
+                socket.emit("webrtc-leave"); 
+            }
+
+            socket.on("webrtc-join", async (id) => {
+                if (!isVideoActive) return;
+                
+                const pc = createPeerConnection(id);
+                peers[id] = pc;
+                
+                try {
+                    const offer = await pc.createOffer();
+                    await pc.setLocalDescription(offer);
+                    socket.emit("webrtc-offer", { to: id, offer });
+                } catch (err) {
+                    console.error("Error creating offer", err);
+                }
+            });
+
+            socket.on("webrtc-offer", async (data) => {
+                if (!isVideoActive) return;
+                
+                const { from, offer } = data;
+                const pc = createPeerConnection(from);
+                peers[from] = pc;
+                
+                try {
+                    await pc.setRemoteDescription(new RTCSessionDescription(offer));
+                    const answer = await pc.createAnswer();
+                    await pc.setLocalDescription(answer);
+                    socket.emit("webrtc-answer", { to: from, answer });
+                } catch (err) {
+                    console.error("Error handling offer", err);
+                }
+            });
+
+            socket.on("webrtc-answer", async (data) => {
+                const { from, answer } = data;
+                if (peers[from]) {
+                    try {
+                        await peers[from].setRemoteDescription(new RTCSessionDescription(answer));
+                    } catch (err) {
+                        console.error("Error setting remote answer", err);
+                    }
+                }
+            });
+
+            socket.on("webrtc-ice-candidate", async (data) => {
+                const { from, candidate } = data;
+                if (peers[from]) {
+                    try {
+                        await peers[from].addIceCandidate(new RTCIceCandidate(candidate));
+                    } catch (err) {
+                        console.error("Error adding ice candidate", err);
+                    }
+                }
+            });
+
+            socket.on("webrtc-leave", (id) => {
+                removeVideoStream(id);
+                if (peers[id]) {
+                    peers[id].close();
+                    delete peers[id];
+                }
+            });
+
+            function createPeerConnection(remoteId) {
+                const pc = new RTCPeerConnection(rtcConfig);
+                
+                if (localStream) {
+                    localStream.getTracks().forEach(track => {
+                        pc.addTrack(track, localStream);
+                    });
+                }
+                
+                pc.onicecandidate = (e) => {
+                    if (e.candidate) {
+                        socket.emit("webrtc-ice-candidate", { to: remoteId, candidate: e.candidate });
+                    }
+                };
+                
+                pc.ontrack = (e) => {
+                    const stream = e.streams[0];
+                    if (!document.getElementById(`video-${remoteId}`)) {
+                        addVideoStream(remoteId, stream, "Remote User");
+                    }
+                };
+                
+                pc.oniceconnectionstatechange = () => {
+                    if (pc.iceConnectionState === "disconnected" || pc.iceConnectionState === "failed") {
+                        removeVideoStream(remoteId);
+                        pc.close();
+                        delete peers[remoteId];
+                    }
+                };
+                
+                return pc;
+            }
+
+            function addVideoStream(id, stream, labelText="User", muted=false) {
+                let wrapper = document.getElementById(`video-wrapper-${id}`);
+                if (!wrapper) {
+                    wrapper = document.createElement("div");
+                    wrapper.id = `video-wrapper-${id}`;
+                    wrapper.className = "video-wrapper";
+                    
+                    const video = document.createElement("video");
+                    video.id = `video-${id}`;
+                    video.autoplay = true;
+                    video.playsInline = true;
+                    if (muted) video.muted = true;
+                    video.srcObject = stream;
+                    
+                    const label = document.createElement("div");
+                    label.className = "video-label";
+                    label.textContent = labelText;
+                    
+                    wrapper.appendChild(video);
+                    wrapper.appendChild(label);
+                    
+                    if (id === "local") {
+                        const controls = document.createElement("div");
+                        controls.className = "video-controls";
+                        
+                        const micBtn = document.createElement("button");
+                        micBtn.className = "video-btn";
+                        micBtn.textContent = "🎙️";
+                        micBtn.onclick = () => {
+                            const audioTrack = stream.getAudioTracks()[0];
+                            if (audioTrack) {
+                                audioTrack.enabled = !audioTrack.enabled;
+                                micBtn.style.opacity = audioTrack.enabled ? "1" : "0.5";
+                            }
+                        };
+                        
+                        const camBtn = document.createElement("button");
+                        camBtn.className = "video-btn";
+                        camBtn.textContent = "📷";
+                        camBtn.onclick = () => {
+                            const videoTrack = stream.getVideoTracks()[0];
+                            if (videoTrack) {
+                                videoTrack.enabled = !videoTrack.enabled;
+                                camBtn.style.opacity = videoTrack.enabled ? "1" : "0.5";
+                            }
+                        };
+                        
+                        controls.appendChild(micBtn);
+                        controls.appendChild(camBtn);
+                        wrapper.appendChild(controls);
+                    }
+                    
+                    videoContainer.appendChild(wrapper);
+                }
+            }
+
+            function removeVideoStream(id) {
+                const wrapper = document.getElementById(`video-wrapper-${id}`);
+                if (wrapper) wrapper.remove();
+            }
+        }
+
+        init();
+    </script>
+</body>
+</html>
