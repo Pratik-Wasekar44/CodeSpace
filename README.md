@@ -31,7 +31,7 @@ Multiple users can join the same room and edit code simultaneously with live syn
 
 1. Clone the repository:
 
-git clone https://github.com/satwikchoudhari/real-time-collabrative-editor-AI_assisatnce.git
+git clone https://github.com/Pratik-Wasekar44/CodeSpace.git 
 
 2. Navigate into the project folder:
 
