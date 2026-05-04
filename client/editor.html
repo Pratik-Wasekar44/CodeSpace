@@ -554,6 +554,7 @@
 
             // --- WebRTC Logic ---
             const peers = {}; // socket.id -> RTCPeerConnection
+            const iceCandidateQueue = {}; // socket.id -> Array of candidates
             let localStream = null;
             let isVideoActive = false;
             const videoContainer = document.getElementById("videoContainer");
@@ -598,16 +599,18 @@
                 for (let id in peers) {
                     peers[id].close();
                     delete peers[id];
+                    delete iceCandidateQueue[id];
                 }
                 
                 videoContainer.innerHTML = "";
                 socket.emit("webrtc-leave"); 
             }
 
-            socket.on("webrtc-join", async (id) => {
+            socket.on("webrtc-join", async (data) => {
                 if (!isVideoActive) return;
                 
-                const pc = createPeerConnection(id);
+                const { id, username } = data;
+                const pc = createPeerConnection(id, username);
                 peers[id] = pc;
                 
                 try {
@@ -622,12 +625,20 @@
             socket.on("webrtc-offer", async (data) => {
                 if (!isVideoActive) return;
                 
-                const { from, offer } = data;
-                const pc = createPeerConnection(from);
+                const { from, username, offer } = data;
+                const pc = createPeerConnection(from, username);
                 peers[from] = pc;
                 
                 try {
                     await pc.setRemoteDescription(new RTCSessionDescription(offer));
+                    
+                    if (iceCandidateQueue[from]) {
+                        for (const c of iceCandidateQueue[from]) {
+                            await pc.addIceCandidate(new RTCIceCandidate(c));
+                        }
+                        delete iceCandidateQueue[from];
+                    }
+
                     const answer = await pc.createAnswer();
                     await pc.setLocalDescription(answer);
                     socket.emit("webrtc-answer", { to: from, answer });
@@ -641,6 +652,13 @@
                 if (peers[from]) {
                     try {
                         await peers[from].setRemoteDescription(new RTCSessionDescription(answer));
+                        
+                        if (iceCandidateQueue[from]) {
+                            for (const c of iceCandidateQueue[from]) {
+                                await peers[from].addIceCandidate(new RTCIceCandidate(c));
+                            }
+                            delete iceCandidateQueue[from];
+                        }
                     } catch (err) {
                         console.error("Error setting remote answer", err);
                     }
@@ -649,12 +667,15 @@
 
             socket.on("webrtc-ice-candidate", async (data) => {
                 const { from, candidate } = data;
-                if (peers[from]) {
+                if (peers[from] && peers[from].remoteDescription) {
                     try {
                         await peers[from].addIceCandidate(new RTCIceCandidate(candidate));
                     } catch (err) {
                         console.error("Error adding ice candidate", err);
                     }
+                } else {
+                    if (!iceCandidateQueue[from]) iceCandidateQueue[from] = [];
+                    iceCandidateQueue[from].push(candidate);
                 }
             });
 
@@ -663,10 +684,11 @@
                 if (peers[id]) {
                     peers[id].close();
                     delete peers[id];
+                    delete iceCandidateQueue[id];
                 }
             });
 
-            function createPeerConnection(remoteId) {
+            function createPeerConnection(remoteId, remoteUsername) {
                 const pc = new RTCPeerConnection(rtcConfig);
                 
                 if (localStream) {
@@ -684,7 +706,7 @@
                 pc.ontrack = (e) => {
                     const stream = e.streams[0];
                     if (!document.getElementById(`video-${remoteId}`)) {
-                        addVideoStream(remoteId, stream, "Remote User");
+                        addVideoStream(remoteId, stream, remoteUsername);
                     }
                 };
                 
@@ -693,6 +715,7 @@
                         removeVideoStream(remoteId);
                         pc.close();
                         delete peers[remoteId];
+                        delete iceCandidateQueue[remoteId];
                     }
                 };
                 

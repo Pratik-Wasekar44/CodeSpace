@@ -133,15 +133,15 @@ io.on("connection", (socket) => {
 
         // WebRTC Signaling
         socket.on("webrtc-join", () => {
-            socket.to(roomId).emit("webrtc-join", socket.id);
+            socket.to(roomId).emit("webrtc-join", { id: socket.id, username: socket.username });
         });
 
         socket.on("webrtc-offer", (data) => {
-            socket.to(data.to).emit("webrtc-offer", { from: socket.id, offer: data.offer });
+            socket.to(data.to).emit("webrtc-offer", { from: socket.id, username: socket.username, offer: data.offer });
         });
 
         socket.on("webrtc-answer", (data) => {
-            socket.to(data.to).emit("webrtc-answer", { from: socket.id, answer: data.answer });
+            socket.to(data.to).emit("webrtc-answer", { from: socket.id, username: socket.username, answer: data.answer });
         });
 
         socket.on("webrtc-ice-candidate", (data) => {
